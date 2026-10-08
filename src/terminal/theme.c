@@ -61,6 +61,25 @@ static const struct theme_preset THEME_PRESETS[] = {
         },
     },
     {
+        .name = "gold-blue",
+        .roles = {
+            [THEME_ACCENT]      = COLOR_STYLE(ANSI_FG_RGB(234, 182, 74)),
+            [THEME_CHROME]      = COLOR_STYLE(ANSI_FG_RGB(112, 174, 236)),
+            [THEME_CHROME_DIM]  = ROLE_STYLE(ANSI_DIM ANSI_FG_RGB(112, 174, 236),
+                                             ANSI_FG_DEFAULT ANSI_BOLD_OFF),
+            [THEME_STANCE]      = COLOR_STYLE(ANSI_CYAN),
+            [THEME_CODE_INLINE] = COLOR_STYLE(ANSI_CYAN),
+            [THEME_CODE_BLOCK]  = ROLE_STYLE(ANSI_DIM, ANSI_BOLD_OFF),
+            [THEME_HEADING]     = ROLE_STYLE(ANSI_BOLD, ANSI_BOLD_OFF),
+            [THEME_LINK]        = ROLE_STYLE(ANSI_UNDERLINE, ANSI_UNDERLINE_OFF),
+            [THEME_ADD]         = COLOR_STYLE(ANSI_GREEN),
+            [THEME_REMOVE]      = COLOR_STYLE(ANSI_RED),
+            [THEME_OK]          = COLOR_STYLE(ANSI_GREEN),
+            [THEME_ERROR]       = COLOR_STYLE(ANSI_RED),
+            [THEME_WARN]        = COLOR_STYLE(ANSI_YELLOW),
+        },
+    },
+    {
         .name = "dark",
         .tint_palette = TINT_PALETTE_DARK,
         .roles = {
@@ -321,7 +340,8 @@ void theme_init(void)
     if (theme_set(theme) != 0) {
         theme_set("auto");
         if (invalid_value_changed(&last_invalid_theme, theme))
-            hax_warn("unknown theme '%s' (expected auto, dark, light, ansi, or off)", theme);
+            hax_warn("unknown theme '%s' (expected auto, dark, light, ansi, gold-blue, or off)",
+                     theme);
     }
 
     const char *tint = configured_tint();

@@ -46,6 +46,32 @@ static void test_default_is_ansi(void)
     expect_all_roles_defined();
 }
 
+static void test_gold_blue_theme(void)
+{
+    const char *ansi_open[THEME_ROLE_COUNT];
+    const char *ansi_close[THEME_ROLE_COUNT];
+    for (int role = 0; role < THEME_ROLE_COUNT; role++) {
+        ansi_open[role] = theme_open((enum theme_role)role);
+        ansi_close[role] = theme_close((enum theme_role)role);
+    }
+
+    EXPECT(theme_set("GOLD-BLUE") == 0);
+    EXPECT_STR_EQ(theme_name(), "gold-blue");
+    EXPECT_STR_EQ(theme_open(THEME_ACCENT), "\x1b[38;2;234;182;74m");
+    EXPECT_STR_EQ(theme_open(THEME_CHROME), "\x1b[38;2;112;174;236m");
+    EXPECT_STR_EQ(theme_open(THEME_CHROME_DIM), ANSI_DIM "\x1b[38;2;112;174;236m");
+    EXPECT_STR_EQ(theme_open(THEME_ADD), ANSI_GREEN);
+    EXPECT_STR_EQ(theme_open(THEME_REMOVE), ANSI_RED);
+
+    for (int role = 0; role < THEME_ROLE_COUNT; role++) {
+        if (role != THEME_ACCENT && role != THEME_CHROME && role != THEME_CHROME_DIM)
+            EXPECT_STR_EQ(theme_open((enum theme_role)role), ansi_open[role]);
+        EXPECT_STR_EQ(theme_close((enum theme_role)role), ansi_close[role]);
+    }
+    expect_all_roles_defined();
+    EXPECT(theme_set("ansi") == 0);
+}
+
 static void test_indexed_themes(void)
 {
     EXPECT(theme_set("dark") == 0);
@@ -171,6 +197,10 @@ static void test_themes_without_tints(void)
     EXPECT(theme_set("ansi") == 0);
     EXPECT_STR_EQ(theme_open(THEME_STANCE), ANSI_CYAN);
     EXPECT_STR_EQ(theme_open(THEME_CODE_INLINE), ANSI_CYAN);
+    EXPECT(theme_set("gold-blue") == 0);
+    EXPECT_STR_EQ(theme_open(THEME_STANCE), ANSI_CYAN);
+    EXPECT_STR_EQ(theme_open(THEME_CODE_INLINE), ANSI_CYAN);
+    EXPECT(theme_tint_open("sage") == NULL);
     EXPECT(theme_set("off") == 0);
     EXPECT_STR_EQ(theme_open(THEME_STANCE), "");
     EXPECT_STR_EQ(theme_open(THEME_CODE_INLINE), "");
@@ -399,6 +429,7 @@ static void test_masked_invalid_tint_warning(void)
 int main(void)
 {
     test_default_is_ansi();
+    test_gold_blue_theme();
     test_indexed_themes();
     test_off_theme_preserves_attributes();
     test_theme_set_validation();

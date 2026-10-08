@@ -871,6 +871,9 @@ static void test_choice_value_validation(void)
     char *canonical = config_value_canonical(theme, "LIGHT");
     EXPECT_STR_EQ(canonical, "light");
     free(canonical);
+    canonical = config_value_canonical(theme, "GOLD-BLUE");
+    EXPECT_STR_EQ(canonical, "gold-blue");
+    free(canonical);
     EXPECT(config_value_canonical(theme, "nonesuch") == NULL);
     EXPECT(config_value_canonical(config_setting_find("markdown"), "ON") == NULL);
     EXPECT(config_value_canonical(system_prompt, "whatever") == NULL);
@@ -889,6 +892,7 @@ static void test_choice_value_validation(void)
     EXPECT(theme && theme->choices);
     EXPECT(config_value_valid(theme, "dark"));
     EXPECT(config_value_valid(theme, "AUTO"));
+    EXPECT(config_value_valid(theme, "gold-blue"));
     EXPECT(config_value_valid(theme, "off"));
     EXPECT(!config_value_valid(theme, "dar"));
     EXPECT(!config_value_valid(theme, "darker"));

@@ -9,6 +9,8 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ### Added
 
+- A `gold-blue` theme uses truecolor gold for user input and blue for application chrome while
+  retaining the `ansi` theme's other colors.
 - Shell-like Tab completion of `/` commands and their arguments.
 - A dim placeholder after a `/` command shows the arguments it takes.
 - `/provider`, `/model`, and `/effort` take an id or level and apply it without a picker:

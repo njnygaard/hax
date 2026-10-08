@@ -27,14 +27,14 @@ enum theme_role {
 const char *theme_open(enum theme_role role);
 const char *theme_close(enum theme_role role);
 
-/* Select auto, dark, light, ansi, or off by case-insensitive name. "auto" inspects NO_COLOR, TERM,
- * COLORTERM, and COLORFGBG. The initial theme is "ansi". Return 0 on success or -1 without
- * changing the current theme. */
+/* Select auto, dark, light, ansi, gold-blue, or off by case-insensitive name. "auto" inspects
+ * NO_COLOR, TERM, COLORTERM, and COLORFGBG. The initial theme is "ansi". Return 0 on success or -1
+ * without changing the current theme. */
 int theme_set(const char *name);
 
 /* Select teal, violet, rose, or sage by case-insensitive name. Tints affect only the stance and
- * Markdown roles, and do not apply to the ansi or off themes. The initial tint is "teal". Return 0
- * on success or -1 without changing the current tint. */
+ * Markdown roles, and do not apply to the ansi, gold-blue, or off themes. The initial tint is
+ * "teal". Return 0 on success or -1 without changing the current tint. */
 int theme_tint_set(const char *name);
 
 /* Apply the configured theme and tint. An invalid value falls back to "auto" or "teal"; repeated

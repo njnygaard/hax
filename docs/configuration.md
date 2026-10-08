@@ -239,7 +239,7 @@ provider-dependent.
 | `context_limit` | `HAX_CONTEXT_LIMIT` | auto | Override the model context-window size used for display and compaction. |
 | `display_width` | `HAX_DISPLAY_WIDTH` | `auto` | `auto`, `terminal`, or an exact width of at least 20 columns. |
 | `notify` | `HAX_NOTIFY` | `auto` | Completion notification: `auto`, `bel`, `osc9`, or `off`. |
-| `theme` | `HAX_THEME` | `auto` | `auto`, `dark`, `light`, `ansi`, or `off`. |
+| `theme` | `HAX_THEME` | `auto` | `auto`, `dark`, `light`, `ansi`, `gold-blue`, or `off`. |
 | `tint` | `HAX_TINT` | `teal` | Model-output tint: `teal`, `violet`, `rose`, or `sage`. |
 | `keep_awake` | `HAX_KEEP_AWAKE` | on | Best-effort idle-sleep inhibition while a turn runs. |
 | `compact.auto` | `HAX_COMPACT_AUTO` | on | Automatically summarize the conversation near the context limit. |
@@ -248,7 +248,8 @@ provider-dependent.
 
 `theme=auto` respects `NO_COLOR`, terminal color support, and `COLORFGBG` when available. Terminals
 rarely report a light background reliably, so set `light` explicitly if auto detection is wrong.
-`theme=ansi` uses the terminal's own 16-color palette; identity tints apply only to dark/light themes.
+`theme=ansi` uses the terminal's own 16-color palette. `theme=gold-blue` changes its user accent and
+application chrome to fixed truecolor values; identity tints apply only to dark/light themes.
 
 ### Recording
 

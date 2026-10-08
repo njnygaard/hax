@@ -25,12 +25,13 @@
 #define ANSI_UNDERLINE_OFF ANSI_CSI "24m"
 
 /* Production rendering should normally use semantic theme roles instead of raw palette colors. */
-#define ANSI_RED            ANSI_CSI "31m"
-#define ANSI_GREEN          ANSI_CSI "32m"
-#define ANSI_YELLOW         ANSI_CSI "33m"
-#define ANSI_CYAN           ANSI_CSI "36m"
-#define ANSI_BRIGHT_MAGENTA ANSI_CSI "95m"
-#define ANSI_FG_DEFAULT     ANSI_CSI "39m"
+#define ANSI_RED             ANSI_CSI "31m"
+#define ANSI_GREEN           ANSI_CSI "32m"
+#define ANSI_YELLOW          ANSI_CSI "33m"
+#define ANSI_CYAN            ANSI_CSI "36m"
+#define ANSI_BRIGHT_MAGENTA  ANSI_CSI "95m"
+#define ANSI_FG_DEFAULT      ANSI_CSI "39m"
+#define ANSI_FG_RGB(r, g, b) ANSI_CSI "38;2;" #r ";" #g ";" #b "m"
 
 #define ANSI_ERASE_LINE   ANSI_CSI "K"  /* cursor through line end (EL 0) */
 #define ANSI_ERASE_BELOW  ANSI_CSI "J"  /* cursor through screen end (ED 0) */

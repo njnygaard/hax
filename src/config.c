@@ -72,11 +72,12 @@ static const struct config_setting REGISTRY[] = {
                     "(auto detects from the terminal)",
      .choices = "auto|bel|osc9|off", .editable = 1},
     {.key = "theme", .env_var = "HAX_THEME", .default_value = "auto",
-     .description = "Color theme: auto, dark, light, ansi, off (auto detects from the terminal)",
-     .choices = "auto|dark|light|ansi|off", .editable = 1},
+     .description =
+         "Color theme: auto, dark, light, ansi, gold-blue, off (auto detects from the terminal)",
+     .choices = "auto|dark|light|ansi|gold-blue|off", .editable = 1},
     {.key = "tint", .env_var = "HAX_TINT", .default_value = "teal",
      .description = "Identity tint for model output; an active preset's own tint wins until set "
-                    "here. Ignored by the ansi and off themes",
+                    "here. Ignored by the ansi, gold-blue, and off themes",
      .choices = "teal|violet|rose|sage", .editable = 1},
 
     /* behavior */
