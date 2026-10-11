@@ -36,6 +36,7 @@ enum item_origin {
     ITEM_ORIGIN_SUMMARIZED,   /* TOOL_RESULT standing in for separately displayed output */
     ITEM_ORIGIN_TASK_NOTE,    /* synthetic USER_MESSAGE reporting finished background tasks */
     ITEM_ORIGIN_COMPACTION,   /* TURN_USAGE of a summarization request, not an agent turn */
+    ITEM_ORIGIN_FINAL_OUTPUT, /* adopted assistant text, or its separately displayed tool result */
 };
 
 /* One inline image carried by an item: base64 payload plus the metadata
@@ -63,6 +64,8 @@ struct item {
     /* TOOL_RESULT: length of a trailing model-only annotation in `output`; user-facing
      * rendering omits it. */
     size_t output_hidden_tail;
+    /* TOOL_RESULT: transient owned candidate for an exact final assistant response. */
+    char *final_output;
     /* TOOL_RESULT: owned image parts attached alongside `output`. */
     struct item_image *images;
     size_t n_images;

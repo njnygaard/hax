@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "agent_tool.h"
 
+#include <jansson.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,20 @@ char *agent_tool_call_run(const struct agent_tool_call *tc, struct tool_run_ctx 
     return tc->tool->run(tc->effective.tool_arguments_json, ctx);
 }
 
+int agent_tool_call_requests_final_output(const struct agent_tool_call *tc)
+{
+    if (!tc->tool || !tc->tool->final_output_arg || !tc->effective.tool_arguments_json)
+        return 0;
+
+    json_t *arguments = json_loads(tc->effective.tool_arguments_json, 0, NULL);
+    if (!arguments)
+        return 0;
+    json_t *value = json_object_get(arguments, tc->tool->final_output_arg);
+    int requested = json_is_true(value);
+    json_decref(arguments);
+    return requested;
+}
+
 struct item agent_tool_result_make(const struct item *call, const char *output,
                                    struct tool_run_ctx *ctx)
 {
@@ -57,6 +72,8 @@ struct item agent_tool_result_make(const struct item *call, const char *output,
         if (ctx->interrupted)
             result.origin = ITEM_ORIGIN_INTERRUPTED;
         result.output_hidden_tail = ctx->output_hidden_tail;
+        result.final_output = ctx->final_output;
+        ctx->final_output = NULL;
     }
     return result;
 }

@@ -21,7 +21,10 @@ void agent_tool_call_destroy(struct agent_tool_call *tc);
 /* Returns the tool's allocated output, or an allocated unknown-tool error. */
 char *agent_tool_call_run(const struct agent_tool_call *tc, struct tool_run_ctx *ctx);
 
-/* Build an owned result, sanitize output, and move result images out of ctx when non-NULL. */
+/* True when a supported tool's declared boolean final-output argument is explicitly true. */
+int agent_tool_call_requests_final_output(const struct agent_tool_call *tc);
+
+/* Build an owned result, sanitize output, and move result attachments out of ctx when non-NULL. */
 struct item agent_tool_result_make(const struct item *call, const char *output,
                                    struct tool_run_ctx *ctx);
 

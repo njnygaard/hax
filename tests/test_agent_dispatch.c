@@ -47,6 +47,21 @@ static const struct tool TOOL_TAIL_PROBE = {
     .display = {.preview_mode = TOOL_PREVIEW_HEAD_TAIL},
 };
 
+static char *run_final_probe(const char *args_json, struct tool_run_ctx *ctx)
+{
+    (void)args_json;
+    if (ctx->final_output_allowed)
+        ctx->final_output = xstrdup("ADOPTED_BODY\n");
+    return xstrdup("ADOPTED_BODY\nmodel-only detail\n");
+}
+
+static const struct tool TOOL_FINAL_PROBE = {
+    .def = {.name = "final-probe"},
+    .run = run_final_probe,
+    .final_output_arg = "final_output",
+    .display = {.preview_mode = TOOL_PREVIEW_HEAD_TAIL},
+};
+
 /* agent_find_tool lives in agent_core.c alongside the full tool table; stub it
  * so this test links only its own tools and the render stack. */
 const struct tool *agent_find_tool(const char *name)
@@ -57,6 +72,8 @@ const struct tool *agent_find_tool(const char *name)
         return &TOOL_MODE_PROBE;
     if (strcmp(name, "tail-probe") == 0)
         return &TOOL_TAIL_PROBE;
+    if (strcmp(name, "final-probe") == 0)
+        return &TOOL_FINAL_PROBE;
     return NULL;
 }
 
@@ -149,7 +166,7 @@ static const char *run_write(const char *path, const char *content_json, struct 
     struct render_ctx render = {0};
     render.mode = RENDER_IDLE;
     render.spinner = spinner_new(NULL);
-    *out = dispatch_tool_call(&render, &call, -1);
+    *out = dispatch_tool_call(&render, &call, -1, 0);
     const char *cap = cap_read();
     spinner_free(render.spinner);
 
@@ -215,7 +232,7 @@ static void test_selector_overrides_non_collapsed_mode(void)
     struct render_ctx render = {.mode = RENDER_IDLE, .spinner = spinner_new(NULL)};
 
     cap_reset();
-    struct item result = dispatch_tool_call(&render, &call, -1);
+    struct item result = dispatch_tool_call(&render, &call, -1, 0);
     const char *cap = cap_read();
 
     EXPECT(strstr(cap, "more line") != NULL);
@@ -239,7 +256,7 @@ static void test_hidden_tail_not_displayed_by_fallback(void)
     struct render_ctx render = {.mode = RENDER_IDLE, .spinner = spinner_new(NULL)};
 
     cap_reset();
-    struct item result = dispatch_tool_call(&render, &call, -1);
+    struct item result = dispatch_tool_call(&render, &call, -1, 0);
     const char *cap = cap_read();
 
     EXPECT(strstr(cap, "body-line") != NULL);
@@ -247,6 +264,29 @@ static void test_hidden_tail_not_displayed_by_fallback(void)
     /* The model-facing result keeps the tail and its length. */
     EXPECT(result.output && strstr(result.output, "model-only note") != NULL);
     EXPECT(result.output_hidden_tail == strlen("\n[model-only note]"));
+    item_free(&result);
+    spinner_free(render.spinner);
+    item_free(&call);
+}
+
+static void test_final_output_candidate_is_not_previewed(void)
+{
+    struct item call = {
+        .kind = ITEM_TOOL_CALL,
+        .call_id = xstrdup("call-final"),
+        .tool_name = xstrdup("final-probe"),
+        .tool_arguments_json = xstrdup("{\"final_output\":true}"),
+    };
+    struct render_ctx render = {.mode = RENDER_IDLE, .spinner = spinner_new(NULL)};
+
+    cap_reset();
+    struct item result = dispatch_tool_call(&render, &call, -1, 1);
+    const char *cap = cap_read();
+
+    EXPECT(strstr(cap, "ADOPTED_BODY") == NULL);
+    EXPECT(strstr(cap, "model-only detail") == NULL);
+    EXPECT_STR_EQ(result.final_output, "ADOPTED_BODY\n");
+    EXPECT(strstr(result.output, "model-only detail") != NULL);
     item_free(&result);
     spinner_free(render.spinner);
     item_free(&call);
@@ -260,5 +300,6 @@ int main(void)
     test_visible_content_shows_preview_not_summary();
     test_selector_overrides_non_collapsed_mode();
     test_hidden_tail_not_displayed_by_fallback();
+    test_final_output_candidate_is_not_previewed();
     T_REPORT();
 }

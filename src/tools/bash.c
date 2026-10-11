@@ -60,6 +60,21 @@ static char *run_bash(const char *args_json, struct tool_run_ctx *ctx)
         return xstrdup("background tasks are disabled; run the command synchronously");
     }
 
+    json_t *final_output_value = json_object_get(arguments, "final_output");
+    if (final_output_value && !json_is_boolean(final_output_value)) {
+        json_decref(arguments);
+        return xstrdup("'final_output' must be a boolean");
+    }
+    int final_output = final_output_value ? json_boolean_value(final_output_value) : 0;
+    if (final_output && background) {
+        json_decref(arguments);
+        return xstrdup("'final_output' requires a synchronous command");
+    }
+    if (final_output && (!ctx || !ctx->final_output_allowed)) {
+        json_decref(arguments);
+        return xstrdup("'final_output' requires this command to be the sole tool call");
+    }
+
     /* Validate before the command runs, so a bad name is a side-effect-free retry. With tasks
      * disabled the name is inert and ignored. Models routinely send every declared field, so an
      * empty name means unnamed rather than forcing a retry. */
@@ -96,7 +111,12 @@ static char *run_bash(const char *args_json, struct tool_run_ctx *ctx)
         return error;
     }
 
-    char *result = bash_run_command(command, timeout_ms, background, name, ctx);
+    tool_display_fn display = ctx ? ctx->display : NULL;
+    if (final_output)
+        ctx->display = NULL;
+    char *result = bash_run_command(command, timeout_ms, background, name, final_output, ctx);
+    if (final_output)
+        ctx->display = display;
     json_decref(arguments);
     return result;
 }
@@ -169,6 +189,13 @@ static const char BASH_DESCRIPTION[] = BASH_DESCRIPTION_COMMON
 
 static const struct tool_param BASH_PARAMS[] = {
     {.name = "command", .type = "string", .required = 1, .description = "Shell command to run."},
+    {.name = "final_output",
+     .type = "boolean",
+     .description = "When this is the sole tool call and successful non-empty plain-text stdout "
+                    "is already the exact answer, adopt it verbatim as the final assistant "
+                    "response without another model request. Non-zero exit, empty or unsafe "
+                    "stdout, and invalid use continue through an ordinary tool result; stderr is "
+                    "never adopted."},
     {.name = "timeout_seconds",
      .type = "integer",
      .minimum = 1,
@@ -193,6 +220,13 @@ static const char BASH_DESCRIPTION_NO_TASKS[] = BASH_DESCRIPTION_COMMON
 
 static const struct tool_param BASH_PARAMS_NO_TASKS[] = {
     {.name = "command", .type = "string", .required = 1, .description = "Shell command to run."},
+    {.name = "final_output",
+     .type = "boolean",
+     .description = "When this is the sole tool call and successful non-empty plain-text stdout "
+                    "is already the exact answer, adopt it verbatim as the final assistant "
+                    "response without another model request. Non-zero exit, empty or unsafe "
+                    "stdout, and invalid use continue through an ordinary tool result; stderr is "
+                    "never adopted."},
     {.name = "timeout_seconds",
      .type = "integer",
      .minimum = 1,
@@ -220,6 +254,7 @@ const struct tool TOOL_BASH = {
     .run = run_bash,
     .preprocess_args = preprocess_args,
     .advertise = bash_advertise,
+    .final_output_arg = "final_output",
     .display = {.arg_name = "command",
                 .preview_mode = TOOL_PREVIEW_HEAD_TAIL,
                 .header_rows = 3,

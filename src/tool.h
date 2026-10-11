@@ -23,6 +23,10 @@ struct tool_run_ctx {
     /* Length of a trailing model-only annotation in the returned output; user-facing rendering
      * omits it. Control-free text only, so stripping the stored copy keeps the length valid. */
     size_t output_hidden_tail;
+    /* The loop permits final-output mode only for a sole supported tool call. */
+    int final_output_allowed;
+    /* Owned exact text to adopt as the final assistant response; NULL means continue normally. */
+    char *final_output;
 };
 
 enum tool_output_style {
@@ -68,6 +72,8 @@ struct tool {
      * gated by this — a withheld tool's run() must answer stray calls with a recoverable
      * error. */
     const struct tool_def *(*advertise)(void);
+    /* Boolean argument that asks the loop to adopt successful tool output as the final answer. */
+    const char *final_output_arg;
     struct tool_display display;
 };
 

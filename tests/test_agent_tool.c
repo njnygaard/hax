@@ -41,7 +41,11 @@ const struct tool TOOL_READ = {
     .run = record_run,
     .preprocess_args = rewrite_args,
 };
-const struct tool TOOL_BASH = {.def = {.name = "bash"}, .run = record_run};
+const struct tool TOOL_BASH = {
+    .def = {.name = "bash"},
+    .run = record_run,
+    .final_output_arg = "final_output",
+};
 const struct tool TOOL_WRITE = {.def = {.name = "write"}, .run = record_run};
 const struct tool TOOL_EDIT = {.def = {.name = "edit"}, .run = record_run};
 
@@ -129,6 +133,27 @@ static void test_unmodified_args(void)
     item_free(&call);
 }
 
+static void test_final_output_request_detection(void)
+{
+    static const struct {
+        const char *name;
+        const char *arguments;
+        int expected;
+    } cases[] = {
+        {"bash", "{\"final_output\":true}", 1},     {"bash", "{\"final_output\":false}", 0},
+        {"bash", "{\"final_output\":\"true\"}", 0}, {"bash", "not json", 0},
+        {"write", "{\"final_output\":true}", 0},    {"missing", "{\"final_output\":true}", 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        struct item call = make_call(cases[i].name, cases[i].arguments);
+        struct agent_tool_call tc;
+        agent_tool_call_init(&tc, &call);
+        EXPECT(agent_tool_call_requests_final_output(&tc) == cases[i].expected);
+        agent_tool_call_destroy(&tc);
+        item_free(&call);
+    }
+}
+
 static struct item_image *make_image(size_t base64_len)
 {
     struct item_image *image = xcalloc(1, sizeof(*image));
@@ -156,6 +181,7 @@ static void test_result_moves_run_context(void)
         .n_result_images = 1,
         .output_summarizes_display = 1,
         .output_hidden_tail = 4,
+        .final_output = xstrdup("exact\n"),
     };
 
     struct item result = agent_tool_result_make(&call, "summary", &ctx);
@@ -164,8 +190,10 @@ static void test_result_moves_run_context(void)
     EXPECT(result.n_images == 1);
     EXPECT(result.origin == ITEM_ORIGIN_SUMMARIZED);
     EXPECT(result.output_hidden_tail == 4);
+    EXPECT_STR_EQ(result.final_output, "exact\n");
     EXPECT(ctx.result_images == NULL);
     EXPECT(ctx.n_result_images == 0);
+    EXPECT(ctx.final_output == NULL);
     item_free(&result);
     item_free(&call);
 }
@@ -237,6 +265,7 @@ int main(void)
     test_result_make_interrupted_provenance();
     test_unknown_tool();
     test_unmodified_args();
+    test_final_output_request_detection();
     test_result_moves_run_context();
     test_image_budget_accepts_result();
     test_image_budget_drops_new_image();

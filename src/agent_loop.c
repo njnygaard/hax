@@ -196,7 +196,7 @@ static int loop_checkpoint(const struct agent_loop_hooks *hooks)
 }
 
 static struct item loop_run_tool(const struct agent_loop_params *params, const struct item *call,
-                                 enum agent_loop_tool_action action)
+                                 enum agent_loop_tool_action action, int final_output_allowed)
 {
     const struct agent_loop_hooks *hooks = &params->hooks;
     /* Resolved per call, not per session: the answer can change under a runtime /model switch
@@ -205,7 +205,7 @@ static struct item loop_run_tool(const struct agent_loop_params *params, const s
 
     struct item result;
     if (hooks->tool_call) {
-        result = hooks->tool_call(call, action, image_input, hooks->user);
+        result = hooks->tool_call(call, action, image_input, final_output_allowed, hooks->user);
     } else if (action == AGENT_LOOP_TOOL_REFUSE) {
         /* Hookless execution owes the same provenance as frontend-rendered results: the action,
          * not the presentation path, determines whether the call was dispatched. */
@@ -217,11 +217,19 @@ static struct item loop_run_tool(const struct agent_loop_params *params, const s
     } else {
         struct agent_tool_call prepared;
         agent_tool_call_init(&prepared, call);
-        struct tool_run_ctx run_ctx = {.image_input = image_input};
+        struct tool_run_ctx run_ctx = {
+            .image_input = image_input,
+            .final_output_allowed = final_output_allowed,
+        };
         char *output = agent_tool_call_run(&prepared, &run_ctx);
         result = agent_tool_result_make(call, output, &run_ctx);
         free(output);
         agent_tool_call_destroy(&prepared);
+    }
+
+    if (!final_output_allowed) {
+        free(result.final_output);
+        result.final_output = NULL;
     }
 
     /* Enforce the aggregate image budget at ingestion — the window excludes `result`, which the
@@ -240,6 +248,26 @@ static void loop_observe_tools(const struct agent_loop_params *params, size_t fr
     for (size_t i = from; i < to; i++)
         if (params->session->items[i].kind == ITEM_TOOL_CALL)
             params->hooks.tool_seen(&params->session->items[i], params->hooks.user);
+}
+
+static size_t loop_final_output_call(const struct agent_session *session, size_t from, size_t to)
+{
+    size_t call_index = to;
+    size_t call_count = 0;
+    for (size_t i = from; i < to; i++) {
+        if (session->items[i].kind != ITEM_TOOL_CALL)
+            continue;
+        call_index = i;
+        call_count++;
+    }
+    if (call_count != 1)
+        return to;
+
+    struct agent_tool_call prepared;
+    agent_tool_call_init(&prepared, &session->items[call_index]);
+    int requested = agent_tool_call_requests_final_output(&prepared);
+    agent_tool_call_destroy(&prepared);
+    return requested ? call_index : to;
 }
 
 /* One footer per served attempt. An aborted turn keeps only attempts that reported usage; a
@@ -397,6 +425,10 @@ static void loop_run_active(const struct agent_loop_params *params,
             return;
         }
 
+        size_t final_output_call =
+            loop_final_output_call(session, absorbed.items_from, response_to);
+        size_t final_output_result = session->n_items;
+
         /* Every streamed tool call gets exactly one result. Disabled tools are refused rather
          * than executed; once cancellation is observed, the remaining batch is paired with
          * interrupted results. A pause request never skips: the whole batch runs and the stop
@@ -412,7 +444,11 @@ static void loop_run_active(const struct agent_loop_params *params,
                 action = AGENT_LOOP_TOOL_REFUSE;
             else if (sig == AGENT_LOOP_SIG_ABORT)
                 action = AGENT_LOOP_TOOL_SKIP;
-            struct item tool_result = loop_run_tool(params, &session->items[i], action);
+            int final_output_allowed = action == AGENT_LOOP_TOOL_RUN && i == final_output_call;
+            struct item tool_result =
+                loop_run_tool(params, &session->items[i], action, final_output_allowed);
+            if (tool_result.final_output)
+                final_output_result = session->n_items;
             agent_session_append(session, tool_result);
         }
 
@@ -422,6 +458,29 @@ static void loop_run_active(const struct agent_loop_params *params,
         sig = loop_checkpoint(hooks);
         if (sig == AGENT_LOOP_SIG_ABORT)
             agent_session_mark_interrupt(session);
+        if (sig == AGENT_LOOP_SIG_PAUSE)
+            pause_pending = 1;
+
+        const char *adopted_output = NULL;
+        if (sig != AGENT_LOOP_SIG_ABORT && !pause_pending &&
+            final_output_result < session->n_items &&
+            session->items[final_output_result].final_output) {
+            char *text = session->items[final_output_result].final_output;
+            session->items[final_output_result].final_output = NULL;
+            session->items[final_output_result].origin = ITEM_ORIGIN_FINAL_OUTPUT;
+            result->final_items_from = session->n_items;
+            agent_session_append(session, (struct item){
+                                              .kind = ITEM_ASSISTANT_MESSAGE,
+                                              .text = text,
+                                              .origin = ITEM_ORIGIN_FINAL_OUTPUT,
+                                          });
+            result->final_items_to = session->n_items;
+            adopted_output = text;
+        } else if (final_output_result < session->n_items) {
+            free(session->items[final_output_result].final_output);
+            session->items[final_output_result].final_output = NULL;
+        }
+
         loop_add_usage(params, &loop_turn, 0);
         loop_flush(params);
         agent_loop_turn_destroy(&loop_turn);
@@ -431,8 +490,12 @@ static void loop_run_active(const struct agent_loop_params *params,
             result->abort_marker_placed = 1;
             return;
         }
-        if (sig == AGENT_LOOP_SIG_PAUSE)
-            pause_pending = 1;
+        if (adopted_output) {
+            if (hooks->final_output)
+                hooks->final_output(adopted_output, hooks->user);
+            result->outcome = AGENT_LOOP_COMPLETE;
+            return;
+        }
 
         /* The seam is the pause point: calls, results, and footer are durable and no marker is
          * owed — history reads as a finished provider turn a later run can continue verbatim.

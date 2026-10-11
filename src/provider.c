@@ -84,6 +84,7 @@ void item_free(struct item *item)
     free(item->tool_name);
     free(item->tool_arguments_json);
     free(item->output);
+    free(item->final_output);
     for (size_t i = 0; i < item->n_images; i++) {
         free(item->images[i].mime);
         free(item->images[i].data_b64);

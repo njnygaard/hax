@@ -118,6 +118,17 @@ static void test_buffer_validity(void)
     EXPECT(!utf8_is_valid("\xED\xA0\x80", 3));
 }
 
+static void test_safe_text(void)
+{
+    EXPECT(utf8_is_safe_text("héllo\tworld\n", sizeof("héllo\tworld\n") - 1));
+    EXPECT(!utf8_is_safe_text("", 0));
+    EXPECT(!utf8_is_safe_text("a\0b", 3));
+    EXPECT(!utf8_is_safe_text("bad\x1B[2J", sizeof("bad\x1B[2J") - 1));
+    EXPECT(!utf8_is_safe_text("bad\xC2\x85", sizeof("bad\xC2\x85") - 1));
+    EXPECT(!utf8_is_safe_text("bad\xE2\x80\xAE", sizeof("bad\xE2\x80\xAE") - 1));
+    EXPECT(!utf8_is_safe_text("\xC3", 1));
+}
+
 static void expect_encoded(uint32_t codepoint, const char *want, size_t want_len)
 {
     char out[4];
@@ -489,6 +500,7 @@ int main(void)
     test_sequence_valid_rejects_continuation_leader();
     test_sequence_valid_rejects_length_mismatch();
     test_buffer_validity();
+    test_safe_text();
     test_encode();
     test_encode_rejects_non_scalar();
 

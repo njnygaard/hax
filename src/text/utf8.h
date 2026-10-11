@@ -16,6 +16,10 @@ int utf8_sequence_is_valid(const char *bytes, size_t length);
 /* Return whether the entire counted buffer is valid UTF-8. */
 int utf8_is_valid(const char *bytes, size_t length);
 
+/* Return whether the entire non-empty buffer is safe for verbatim terminal display. Valid text may
+ * contain tab and newline but not other controls or format characters that hide or reorder text. */
+int utf8_is_safe_text(const char *bytes, size_t length);
+
 /* Write the encoding of a Unicode scalar value to out and return its length, one to four. Returns
  * zero without writing for surrogates and values above U+10FFFF. */
 size_t utf8_encode_codepoint(uint32_t codepoint, char out[4]);

@@ -185,6 +185,13 @@ static struct item CONVERSATION[] = {
      .call_id = (char *)"c5",
      .output = (char *)"hi\n\n[finished during launch; no task created]",
      .output_hidden_tail = sizeof("\n[finished during launch; no task created]") - 1},
+    {.kind = ITEM_TOOL_RESULT,
+     .call_id = (char *)"c6",
+     .output = (char *)"exact answer\n",
+     .origin = ITEM_ORIGIN_FINAL_OUTPUT},
+    {.kind = ITEM_ASSISTANT_MESSAGE,
+     .text = (char *)"exact answer\n",
+     .origin = ITEM_ORIGIN_FINAL_OUTPUT},
 };
 #define CONVERSATION_COUNT (sizeof(CONVERSATION) / sizeof(CONVERSATION[0]))
 

@@ -22,6 +22,22 @@ size_t utf8_sequence_length(unsigned char byte)
     return 1;
 }
 
+static uint32_t decode_sequence(const unsigned char *input, size_t length)
+{
+    uint32_t codepoint;
+    if (length == 1)
+        codepoint = input[0];
+    else if (length == 2)
+        codepoint = input[0] & 0x1F;
+    else if (length == 3)
+        codepoint = input[0] & 0x0F;
+    else
+        codepoint = input[0] & 0x07;
+    for (size_t i = 1; i < length; i++)
+        codepoint = (codepoint << 6) | (input[i] & 0x3F);
+    return codepoint;
+}
+
 int utf8_sequence_is_valid(const char *bytes, size_t length)
 {
     const unsigned char *input = (const unsigned char *)bytes;
@@ -30,19 +46,10 @@ int utf8_sequence_is_valid(const char *bytes, size_t length)
     if (length == 1)
         return input[0] < 0x80;
 
-    uint32_t codepoint;
-    if (length == 2)
-        codepoint = input[0] & 0x1F;
-    else if (length == 3)
-        codepoint = input[0] & 0x0F;
-    else
-        codepoint = input[0] & 0x07;
-
-    for (size_t i = 1; i < length; i++) {
+    for (size_t i = 1; i < length; i++)
         if (!byte_is_continuation(input[i]))
             return 0;
-        codepoint = (codepoint << 6) | (input[i] & 0x3F);
-    }
+    uint32_t codepoint = decode_sequence(input, length);
 
     static const uint32_t minimum_codepoint[] = {0, 0, 0x80, 0x800, 0x10000};
     if (codepoint < minimum_codepoint[length])
@@ -131,7 +138,7 @@ size_t utf8_prev(const char *bytes, size_t offset)
 /* Terminal format controls can hide or reorder content even when libc assigns them zero width.
  * Variation selectors remain available for emoji presentation, though substituting ZWJ can break
  * joined emoji sequences. */
-static int codepoint_requires_substitution(wchar_t codepoint)
+static int codepoint_requires_substitution(uint32_t codepoint)
 {
     if (codepoint == 0x00AD) /* soft hyphen */
         return 1;
@@ -162,6 +169,22 @@ static int codepoint_requires_substitution(wchar_t codepoint)
     if (codepoint >= 0xE0000 && codepoint <= 0xE007F) /* language tags */
         return 1;
     return 0;
+}
+
+int utf8_is_safe_text(const char *bytes, size_t length)
+{
+    if (length == 0 || !utf8_is_valid(bytes, length))
+        return 0;
+
+    for (size_t offset = 0; offset < length;) {
+        size_t sequence_len = utf8_sequence_length((unsigned char)bytes[offset]);
+        uint32_t codepoint = decode_sequence((const unsigned char *)bytes + offset, sequence_len);
+        if ((codepoint < 0x20 && codepoint != '\t' && codepoint != '\n') ||
+            (codepoint >= 0x7F && codepoint <= 0x9F) || codepoint_requires_substitution(codepoint))
+            return 0;
+        offset += sequence_len;
+    }
+    return 1;
 }
 
 int utf8_codepoint_cells(const char *bytes, size_t length, size_t offset, size_t *codepoint_len)

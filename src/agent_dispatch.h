@@ -10,7 +10,8 @@
  * replay recorded calls. */
 
 /* Render and run a tool call. The returned ITEM_TOOL_RESULT owns its fields. */
-struct item dispatch_tool_call(struct render_ctx *render, const struct item *call, int image_input);
+struct item dispatch_tool_call(struct render_ctx *render, const struct item *call, int image_input,
+                               int final_output_allowed);
 
 /* Render a call that was skipped after interruption and return its synthetic result. */
 struct item dispatch_tool_skipped(struct render_ctx *render, const struct item *call);

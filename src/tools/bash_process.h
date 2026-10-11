@@ -12,7 +12,7 @@
  * NULL) becomes the task id if the command detaches. A model-only annotation ending the output
  * is reported via ctx->output_hidden_tail. */
 char *bash_run_command(const char *command, long timeout_ms, int background, const char *name,
-                       struct tool_run_ctx *ctx);
+                       int capture_final_stdout, struct tool_run_ctx *ctx);
 
 /* Signal the command's process group, falling back to the pid when the group is not yet (or no
  * longer) alive. The pid must be unreaped. */

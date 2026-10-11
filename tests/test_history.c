@@ -148,6 +148,29 @@ static void test_hidden_tail_stays_hidden(void)
     free(out);
 }
 
+static void test_final_output_replay_does_not_duplicate_result(void)
+{
+    struct item items[3] = {0};
+    items[0].kind = ITEM_TOOL_CALL;
+    items[0].call_id = (char *)"final";
+    items[0].tool_name = (char *)"bash";
+    items[0].tool_arguments_json = (char *)"{\"command\":\"produce-answer\",\"final_output\":true}";
+    items[1].kind = ITEM_TOOL_RESULT;
+    items[1].call_id = (char *)"final";
+    items[1].output = (char *)"FINAL_OUTPUT_BODY\nwarning\n";
+    items[1].origin = ITEM_ORIGIN_FINAL_OUTPUT;
+    items[2].kind = ITEM_ASSISTANT_MESSAGE;
+    items[2].text = (char *)"FINAL_OUTPUT_BODY\n";
+    items[2].origin = ITEM_ORIGIN_FINAL_OUTPUT;
+
+    char *out = render(HISTORY_FULL, items, 3, 0);
+    const char *body = strstr(out, "FINAL_OUTPUT_BODY");
+    EXPECT(body != NULL);
+    EXPECT(body && strstr(body + 1, "FINAL_OUTPUT_BODY") == NULL);
+    EXPECT(strstr(out, "warning") == NULL);
+    free(out);
+}
+
 /* A collapsed call showed no output live, so it must not gain any here —
  * `read` is collapsed preview, and its result can be a whole file. */
 static void test_full_keeps_collapsed_calls_quiet(void)
@@ -1067,6 +1090,7 @@ int main(void)
     test_brief_omits_tool_output();
     test_full_shows_tool_output();
     test_hidden_tail_stays_hidden();
+    test_final_output_replay_does_not_duplicate_result();
     test_full_keeps_collapsed_calls_quiet();
     test_collapsed_cluster_spans_turns_tightly();
     test_brief_names_verbose_tool_args();

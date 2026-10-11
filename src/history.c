@@ -70,6 +70,14 @@ static void render_assistant(struct render_ctx *render, const struct item *item)
     if (!text || !*text)
         return;
     size_t text_len = strlen(text);
+    if (item->origin == ITEM_ORIGIN_FINAL_OUTPUT) {
+        render_set_mode(render, RENDER_IDLE);
+        render_open_block(render);
+        disp_write(&render->disp, text, text_len);
+        if (text[text_len - 1] != '\n')
+            disp_putc(&render->disp, '\n');
+        return;
+    }
     size_t marker_len = strlen(INTERRUPT_MARKER);
     if (item->origin == ITEM_ORIGIN_INTERRUPTED && text_len >= marker_len &&
         strcmp(text + text_len - marker_len, INTERRUPT_MARKER) == 0) {
@@ -200,7 +208,7 @@ static void render_tool_call(struct render_ctx *render, enum history_detail deta
     } else {
         render_set_mode(render, RENDER_IDLE);
         render_tool_call_header(render, call);
-        if (result)
+        if (result && result->origin != ITEM_ORIGIN_FINAL_OUTPUT)
             render_result_preview(render, call, result, preview_mode);
     }
     agent_tool_call_destroy(&prepared);

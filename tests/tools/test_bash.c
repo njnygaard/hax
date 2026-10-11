@@ -90,6 +90,80 @@ static void test_bash_stderr_merged(void)
     free(out);
 }
 
+static void test_bash_final_output_captures_only_stdout(void)
+{
+    struct display_capture display_output = {0};
+    buf_init(&display_output.buf);
+    struct tool_run_ctx ctx = {
+        .display = append_display,
+        .display_data = &display_output,
+        .final_output_allowed = 1,
+    };
+    char *out = TOOL_BASH.run(
+        "{\"command\":\"printf 'héllo\\n'; printf 'warning\\n' >&2\",\"final_output\":true}", &ctx);
+
+    EXPECT(strstr(out, "héllo\n") != NULL);
+    EXPECT(strstr(out, "warning\n") != NULL);
+    EXPECT_STR_EQ(ctx.final_output, "héllo\n");
+    EXPECT(display_output.buf.len == 0);
+    EXPECT(ctx.display == append_display);
+
+    free(ctx.final_output);
+    free(out);
+    buf_free(&display_output.buf);
+}
+
+static void test_bash_final_output_requires_clean_safe_stdout(void)
+{
+    struct tool_run_ctx ctx = {.final_output_allowed = 1};
+    char *out = TOOL_BASH.run("{\"command\":\"printf 'partial'; printf 'error' >&2; exit 7\","
+                              "\"final_output\":true}",
+                              &ctx);
+    EXPECT(ctx.final_output == NULL);
+    EXPECT(strstr(out, "partial") != NULL);
+    EXPECT(strstr(out, "error") != NULL);
+    EXPECT(strstr(out, "[exit 7]") != NULL);
+    free(out);
+
+    out = TOOL_BASH.run("{\"command\":\"true\",\"final_output\":true}", &ctx);
+    EXPECT(ctx.final_output == NULL);
+    EXPECT_STR_EQ(out, "(no output)");
+    free(out);
+
+    static const char *const unsafe_commands[] = {
+        "printf 'bad\\\\033[2J'",
+        "printf 'bad\\\\0tail'",
+        "printf 'bad\\\\377'",
+    };
+    for (size_t i = 0; i < sizeof(unsafe_commands) / sizeof(unsafe_commands[0]); i++) {
+        char *args = xasprintf("{\"command\":\"%s\",\"final_output\":true}", unsafe_commands[i]);
+        out = TOOL_BASH.run(args, &ctx);
+        EXPECT(ctx.final_output == NULL);
+        free(out);
+        free(args);
+    }
+}
+
+static void test_bash_final_output_validates_use(void)
+{
+    struct tool_run_ctx ctx = {0};
+    char *out = TOOL_BASH.run("{\"command\":\"echo no\",\"final_output\":true}", &ctx);
+    EXPECT(strstr(out, "sole tool call") != NULL);
+    free(out);
+
+    ctx.final_output_allowed = 1;
+    unsetenv("HAX_NO_TASKS");
+    out =
+        TOOL_BASH.run("{\"command\":\"echo no\",\"background\":true,\"final_output\":true}", &ctx);
+    setenv("HAX_NO_TASKS", "1", 1);
+    EXPECT(strstr(out, "synchronous command") != NULL);
+    free(out);
+
+    out = TOOL_BASH.run("{\"command\":\"echo no\",\"final_output\":\"yes\"}", &ctx);
+    EXPECT(strstr(out, "must be a boolean") != NULL);
+    free(out);
+}
+
 static void test_bash_exit_code(void)
 {
     char *out = call_bash("false");
@@ -908,6 +982,9 @@ int main(void)
     test_bash_missing_command();
     test_bash_stdout();
     test_bash_stderr_merged();
+    test_bash_final_output_captures_only_stdout();
+    test_bash_final_output_requires_clean_safe_stdout();
+    test_bash_final_output_validates_use();
     test_bash_exit_code();
     test_bash_signal();
     test_bash_no_output();

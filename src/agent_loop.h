@@ -89,9 +89,12 @@ struct agent_loop_hooks {
     void (*turn_begin)(void *user);
     int (*checkpoint)(void *user);
     void (*tool_seen)(const struct item *call, void *user);
-    /* image_input is the resolved provider/model capability for the run context. */
+    /* Capabilities are resolved for this call; final_output_allowed is true only for a sole
+     * supported terminal call in the provider response. */
     struct item (*tool_call)(const struct item *call, enum agent_loop_tool_action action,
-                             int image_input, void *user);
+                             int image_input, int final_output_allowed, void *user);
+    /* Exact adopted assistant bytes are durable before this display-only notification. */
+    void (*final_output)(const char *text, void *user);
     void (*compact)(void *user);
     /* A background-task note was appended to history before this turn's request; text is
      * borrowed for the call. Display-only. */

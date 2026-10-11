@@ -435,6 +435,157 @@ static void test_empty_cancel_leaves_no_trace(void)
 static int chain_turn;
 static int chain_two_tools;
 
+static void emit_named_tool_call(stream_cb cb, void *user, const char *id, const char *name,
+                                 const char *arguments)
+{
+    struct stream_event start = {.kind = EV_TOOL_CALL_START,
+                                 .u.tool_call_start = {.id = id, .name = name}};
+    struct stream_event delta = {.kind = EV_TOOL_CALL_DELTA,
+                                 .u.tool_call_delta = {.id = id, .args_delta = arguments}};
+    struct stream_event end = {.kind = EV_TOOL_CALL_END, .u.tool_call_end = {.id = id}};
+    cb(&start, user);
+    cb(&delta, user);
+    cb(&end, user);
+}
+
+static int final_output_requests;
+static const char *final_output_arguments;
+static int final_output_second_call;
+static char *displayed_final_output;
+
+static int final_output_stream(struct provider *p, const struct context *ctx, const char *model,
+                               stream_cb cb, void *user, http_tick_cb tick, void *tick_user)
+{
+    (void)p;
+    (void)model;
+    (void)tick;
+    (void)tick_user;
+    EXPECT(ctx != NULL);
+    final_output_requests++;
+
+    if (final_output_requests == 1) {
+        emit_named_tool_call(cb, user, "final", "bash", final_output_arguments);
+        if (final_output_second_call)
+            emit_named_tool_call(cb, user, "other", "read", "{}");
+    } else {
+        emit_text(cb, user, "regenerated");
+    }
+    emit_done(cb, user, usage_tokens(10, 2));
+    return 0;
+}
+
+static void capture_final_output(const char *text, void *user)
+{
+    (void)user;
+    free(displayed_final_output);
+    displayed_final_output = xstrdup(text);
+}
+
+static struct agent_loop_result run_final_output(struct agent_session *session,
+                                                 const char *arguments, int second_call)
+{
+    session_init(session);
+    session->tools = xcalloc(2, sizeof(*session->tools));
+    session->tools[0] = TOOL_BASH.def;
+    session->tools[1].name = "read";
+    session->n_tools = 2;
+    agent_session_add_user(session, "start");
+    struct provider provider = {.name = "test", .stream = final_output_stream};
+    struct agent_loop_params params = {
+        .session = session,
+        .provider = &provider,
+        .max_turns = 4,
+        .hooks = {.final_output = capture_final_output},
+    };
+    final_output_arguments = arguments;
+    final_output_second_call = second_call;
+    final_output_requests = 0;
+    free(displayed_final_output);
+    displayed_final_output = NULL;
+
+    struct agent_loop_result result;
+    agent_loop_run(&params, &result);
+    return result;
+}
+
+static void test_successful_final_tool_output_ends_user_turn(void)
+{
+    struct agent_session session;
+    struct agent_loop_result result =
+        run_final_output(&session,
+                         "{\"command\":\"printf 'héllo\\n'; printf 'warning\\n' >&2\","
+                         "\"final_output\":true}",
+                         0);
+
+    EXPECT(result.outcome == AGENT_LOOP_COMPLETE);
+    EXPECT(result.turns == 1);
+    EXPECT(final_output_requests == 1);
+    EXPECT(result.final_items_to == result.final_items_from + 1);
+    EXPECT(session.items[result.final_items_from].kind == ITEM_ASSISTANT_MESSAGE);
+    EXPECT(session.items[result.final_items_from].origin == ITEM_ORIGIN_FINAL_OUTPUT);
+    EXPECT_STR_EQ(session.items[result.final_items_from].text, "héllo\n");
+    EXPECT_STR_EQ(displayed_final_output, "héllo\n");
+
+    int final_results = 0;
+    for (size_t i = 0; i < session.n_items; i++) {
+        if (session.items[i].kind == ITEM_TOOL_RESULT &&
+            session.items[i].origin == ITEM_ORIGIN_FINAL_OUTPUT) {
+            final_results++;
+            EXPECT(strstr(session.items[i].output, "warning\n") != NULL);
+        }
+    }
+    EXPECT(final_results == 1);
+
+    agent_loop_result_destroy(&result);
+    agent_session_free(&session);
+    free(displayed_final_output);
+    displayed_final_output = NULL;
+}
+
+static void test_rejected_final_output_continues_normally(void)
+{
+    static const char *const rejected[] = {
+        "{\"command\":\"printf partial; exit 7\",\"final_output\":true}",
+        "{\"command\":\"true\",\"final_output\":true}",
+        "{\"command\":\"printf 'bad\\\\033[2J'\",\"final_output\":true}",
+    };
+    for (size_t scenario = 0; scenario < sizeof(rejected) / sizeof(rejected[0]); scenario++) {
+        struct agent_session session;
+        struct agent_loop_result result = run_final_output(&session, rejected[scenario], 0);
+        EXPECT(result.outcome == AGENT_LOOP_COMPLETE);
+        EXPECT(result.turns == 2);
+        EXPECT(final_output_requests == 2);
+        EXPECT(displayed_final_output == NULL);
+        EXPECT(result.final_items_to == result.final_items_from + 1);
+        EXPECT_STR_EQ(session.items[result.final_items_from].text, "regenerated");
+        EXPECT(session.items[result.final_items_from].origin == ITEM_ORIGIN_NONE);
+        agent_loop_result_destroy(&result);
+        agent_session_free(&session);
+    }
+}
+
+static void test_final_output_requires_a_sole_tool_call(void)
+{
+    struct agent_session session;
+    struct agent_loop_result result = run_final_output(
+        &session, "{\"command\":\"printf should-not-run\",\"final_output\":true}", 1);
+
+    EXPECT(result.outcome == AGENT_LOOP_COMPLETE);
+    EXPECT(result.turns == 2);
+    EXPECT(final_output_requests == 2);
+    EXPECT(displayed_final_output == NULL);
+    int saw_rejection = 0;
+    for (size_t i = 0; i < session.n_items; i++) {
+        if (session.items[i].kind == ITEM_TOOL_RESULT && session.items[i].output &&
+            strstr(session.items[i].output, "sole tool call"))
+            saw_rejection = 1;
+    }
+    EXPECT(saw_rejection);
+
+    agent_loop_result_destroy(&result);
+    agent_session_free(&session);
+}
+
 static int chain_stream(struct provider *p, const struct context *ctx, const char *model,
                         stream_cb cb, void *user, http_tick_cb tick, void *tick_user)
 {
@@ -530,9 +681,10 @@ static void count_tool(const struct item *call, void *user)
 }
 
 static struct item run_test_tool(const struct item *call, enum agent_loop_tool_action action,
-                                 int image_input, void *user)
+                                 int image_input, int final_output_allowed, void *user)
 {
     (void)image_input;
+    (void)final_output_allowed;
     struct loop_test_ctx *ctx = user;
     /* Results carry the action's provenance, as the frontend dispatchers' do. */
     if (action == AGENT_LOOP_TOOL_RUN) {
@@ -1410,6 +1562,9 @@ int main(void)
     test_retry_usage_accumulates();
     test_loop_records_footer_per_served_attempt();
     test_empty_cancel_leaves_no_trace();
+    test_successful_final_tool_output_ends_user_turn();
+    test_rejected_final_output_continues_normally();
+    test_final_output_requires_a_sole_tool_call();
     test_loop_runs_tool_chain();
     test_loop_enforces_max_turns();
     test_loop_cancels_tool_batch();

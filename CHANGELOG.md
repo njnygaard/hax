@@ -9,6 +9,9 @@ notes (see [docs/releasing.md](docs/releasing.md)).
 
 ### Added
 
+- The `bash` tool accepts `final_output: true` for a sole synchronous call whose successful safe
+  stdout is already the exact answer, avoiding an extra model round-trip while preserving session
+  and resume history.
 - A `gold-blue` theme uses truecolor gold for user input and blue for application chrome while
   retaining the `ansi` theme's other colors.
 - Shell-like Tab completion of `/` commands and their arguments.

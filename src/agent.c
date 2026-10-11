@@ -988,7 +988,7 @@ static int repl_loop_checkpoint(void *user)
 }
 
 static struct item repl_loop_tool_call(const struct item *call, enum agent_loop_tool_action action,
-                                       int image_input, void *user)
+                                       int image_input, int final_output_allowed, void *user)
 {
     struct repl_loop_ctx *ctx = user;
     struct render_ctx *render = ctx->state->render;
@@ -1000,7 +1000,20 @@ static struct item repl_loop_tool_call(const struct item *call, enum agent_loop_
         render_set_mode(render, RENDER_IDLE);
         return dispatch_tool_skipped(render, call);
     }
-    return dispatch_tool_call(render, call, image_input);
+    return dispatch_tool_call(render, call, image_input, final_output_allowed);
+}
+
+static void repl_loop_final_output(const char *text, void *user)
+{
+    struct repl_loop_ctx *ctx = user;
+    struct render_ctx *render = ctx->state->render;
+    render_set_mode(render, RENDER_IDLE);
+    render_open_block(render);
+    disp_write(&render->disp, text, strlen(text));
+    if (text[strlen(text) - 1] != '\n')
+        disp_putc(&render->disp, '\n');
+    disp_commit_newlines(&render->disp);
+    disp_flush(&render->disp);
 }
 
 static void repl_loop_compact(void *user)
@@ -1299,6 +1312,7 @@ int agent_run(struct provider **provider_io, const struct hax_opts *options)
                     .turn_begin = repl_loop_turn_begin,
                     .checkpoint = repl_loop_checkpoint,
                     .tool_call = repl_loop_tool_call,
+                    .final_output = repl_loop_final_output,
                     .compact = repl_loop_compact,
                     .task_note = repl_loop_task_note,
                 },

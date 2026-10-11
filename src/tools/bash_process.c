@@ -21,6 +21,7 @@
 #include "system/spawn.h"
 #include "terminal/interrupt.h"
 #include "text/fmt.h"
+#include "text/utf8.h"
 #include "tools/bash_env.h"
 #include "tools/bash_output.h"
 #include "tools/bash_shell.h"
@@ -30,6 +31,7 @@
 struct shell_process {
     pid_t pid;
     int output_fd;
+    int error_fd;
 };
 
 static long deadline_after(long now_ms, long duration_ms)
@@ -55,7 +57,7 @@ static void exec_shell_child(const char *shell, const char *argv0, const char *c
     _exit(127);
 }
 
-static char *start_shell(const char *command, struct shell_process *process)
+static char *start_shell(const char *command, int split_output, struct shell_process *process)
 {
     /* Resolve everything before fork so the child can avoid allocator and environment locks. */
     char **envp = bash_build_child_env();
@@ -63,9 +65,14 @@ static char *start_shell(const char *command, struct shell_process *process)
     const char *argv0 = strrchr(shell, '/');
     argv0 = argv0 ? argv0 + 1 : shell;
 
-    int pipe_fds[2];
-    if (pipe(pipe_fds) < 0) {
+    int output_pipe[2] = {-1, -1};
+    int error_pipe[2] = {-1, -1};
+    if (pipe(output_pipe) < 0 || (split_output && pipe(error_pipe) < 0)) {
         char *error = xasprintf("pipe: %s", strerror(errno));
+        if (output_pipe[0] >= 0) {
+            close(output_pipe[0]);
+            close(output_pipe[1]);
+        }
         free(shell);
         free(envp);
         return error;
@@ -75,33 +82,44 @@ static char *start_shell(const char *command, struct shell_process *process)
     pid_t pid = spawn_fork();
     if (pid < 0) {
         char *error = xasprintf("fork: %s", strerror(errno));
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
+        close(output_pipe[0]);
+        close(output_pipe[1]);
+        if (split_output) {
+            close(error_pipe[0]);
+            close(error_pipe[1]);
+        }
         free(shell);
         free(envp);
         return error;
     }
     if (pid == 0) {
-        close(pipe_fds[0]);
+        close(output_pipe[0]);
+        if (split_output)
+            close(error_pipe[0]);
         /* A separate session isolates descendants and removes access to the agent's terminal. */
         setsid();
         /* Backstop for a hax death no handler can see (SIGKILL, OOM): pdeathsig survives the
          * execve, so an exec-optimized `bash -c` leader dies with hax even then. SIGKILL,
          * not SIGTERM — a command that traps TERM must not outlive a dead hax either. */
         spawn_child_die_with_parent(parent_pid, SIGKILL);
-        dup2(pipe_fds[1], STDOUT_FILENO);
-        dup2(pipe_fds[1], STDERR_FILENO);
-        if (pipe_fds[1] > STDERR_FILENO)
-            close(pipe_fds[1]);
+        dup2(output_pipe[1], STDOUT_FILENO);
+        dup2(split_output ? error_pipe[1] : output_pipe[1], STDERR_FILENO);
+        if (output_pipe[1] > STDERR_FILENO)
+            close(output_pipe[1]);
+        if (split_output && error_pipe[1] > STDERR_FILENO)
+            close(error_pipe[1]);
         exec_shell_child(shell, argv0, command, envp);
     }
 
-    close(pipe_fds[1]);
+    close(output_pipe[1]);
+    if (split_output)
+        close(error_pipe[1]);
     free(shell);
     free(envp);
     bash_shell_pgid_publish(pid);
     process->pid = pid;
-    process->output_fd = pipe_fds[0];
+    process->output_fd = output_pipe[0];
+    process->error_fd = split_output ? error_pipe[0] : -1;
     return NULL;
 }
 
@@ -268,16 +286,18 @@ static char *adopt_running_command(const struct shell_process *process, const ch
 }
 
 char *bash_run_command(const char *command, long timeout_ms, int background, const char *name,
-                       struct tool_run_ctx *ctx)
+                       int capture_final_stdout, struct tool_run_ctx *ctx)
 {
     tool_display_fn display = ctx ? ctx->display : NULL;
     void *display_data = ctx ? ctx->display_data : NULL;
     int tasks_enabled = !config_bool("no_tasks");
     if (!tasks_enabled)
         background = 0;
+    if (background)
+        capture_final_stdout = 0;
 
-    struct shell_process process = {0};
-    char *error = start_shell(command, &process);
+    struct shell_process process = {.output_fd = -1, .error_fd = -1};
+    char *error = start_shell(command, capture_final_stdout, &process);
     if (error)
         return error;
 
@@ -297,6 +317,8 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
     int binary = 0;
     int displayed_body = 0;
     struct bash_output *output = bash_output_create(output_cap_bytes());
+    struct buf final_stdout;
+    buf_init(&final_stdout);
     char chunk[4096];
 
     for (;;) {
@@ -350,6 +372,7 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
                         adopt_running_command(&process, command, name, output, binary, background,
                                               started_ms, 0, display, display_data, displayed_body);
                     if (adopted) {
+                        buf_free(&final_stdout);
                         bash_output_destroy(output);
                         return adopted;
                     }
@@ -373,8 +396,12 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
         }
 
         long active_deadline = stop_reason == BASH_STOP_NONE ? transition_deadline : grace_deadline;
-        struct pollfd poll_fd = {.fd = process.output_fd, .events = POLLIN};
-        int poll_result = poll(&poll_fd, 1, poll_timeout_ms(active_deadline));
+        struct pollfd poll_fds[] = {
+            {.fd = process.output_fd, .events = POLLIN},
+            {.fd = process.error_fd, .events = POLLIN},
+        };
+        nfds_t poll_count = process.error_fd >= 0 ? 2 : 1;
+        int poll_result = poll(poll_fds, poll_count, poll_timeout_ms(active_deadline));
         if (poll_result < 0) {
             if (errno == EINTR)
                 continue;
@@ -383,37 +410,57 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
         if (poll_result == 0)
             continue;
 
-        ssize_t bytes_read = read(process.output_fd, chunk, sizeof(chunk));
-        if (bytes_read < 0) {
-            if (errno == EINTR)
+        int read_failed = 0;
+        for (nfds_t i = 0; i < poll_count; i++) {
+            if (poll_fds[i].fd < 0 || poll_fds[i].revents == 0)
                 continue;
-            break;
-        }
-        if (bytes_read == 0) {
-            /* A backgrounded command's descendants may outlive the pipe on purpose. */
-            if (background && stop_reason == BASH_STOP_NONE)
+            ssize_t bytes_read = read(poll_fds[i].fd, chunk, sizeof(chunk));
+            if (bytes_read < 0) {
+                if (errno == EINTR)
+                    continue;
+                read_failed = 1;
                 break;
-            /* EOF cannot yield more cleanup output, so no grace period remains useful. But a
-             * clean exit closes the pipe before it is waitable (coreutils fcloses stdout in an
-             * atexit handler); a kill in that window would rewrite the exit status to SIGKILL,
-             * so let a finishing shell's exit land first. */
-            if (stop_reason == BASH_STOP_NONE)
-                observe_shell_exit(process.pid, &shell_exited, EOF_EXIT_OBSERVE_MS);
-            bash_signal_process_tree(process.pid, SIGKILL);
-            break;
-        }
+            }
+            if (bytes_read == 0) {
+                close(poll_fds[i].fd);
+                if (i == 0)
+                    process.output_fd = -1;
+                else
+                    process.error_fd = -1;
+                continue;
+            }
 
-        if (!binary && memchr(chunk, '\0', (size_t)bytes_read))
-            binary = 1;
-        if (display && !binary) {
-            display(chunk, (size_t)bytes_read, display_data);
-            displayed_body = 1;
+            if (capture_final_stdout && i == 0)
+                buf_append(&final_stdout, chunk, (size_t)bytes_read);
+            if (!binary && memchr(chunk, '\0', (size_t)bytes_read))
+                binary = 1;
+            if (display && !binary) {
+                display(chunk, (size_t)bytes_read, display_data);
+                displayed_body = 1;
+            }
+            bash_output_append(output, chunk, (size_t)bytes_read);
+            if (bash_output_size(output) >= (size_t)BASH_OUTPUT_DRAIN_LIMIT) {
+                bash_signal_process_tree(process.pid, SIGKILL);
+                read_failed = 1;
+                break;
+            }
         }
-        bash_output_append(output, chunk, (size_t)bytes_read);
-        if (bash_output_size(output) >= (size_t)BASH_OUTPUT_DRAIN_LIMIT) {
-            bash_signal_process_tree(process.pid, SIGKILL);
+        if (read_failed)
             break;
-        }
+        if (process.output_fd >= 0 || process.error_fd >= 0)
+            continue;
+
+        /* A backgrounded command's descendants may outlive the pipe on purpose. */
+        if (background && stop_reason == BASH_STOP_NONE)
+            break;
+        /* EOF cannot yield more cleanup output, so no grace period remains useful. But a clean
+         * exit closes the pipe before it is waitable (coreutils fcloses stdout in an atexit
+         * handler); a kill in that window would rewrite the exit status to SIGKILL, so let a
+         * finishing shell's exit land first. */
+        if (stop_reason == BASH_STOP_NONE)
+            observe_shell_exit(process.pid, &shell_exited, EOF_EXIT_OBSERVE_MS);
+        bash_signal_process_tree(process.pid, SIGKILL);
+        break;
     }
     /* Background EOF leaves the tree unsignalled: give a fast exit a moment to be observed
      * and return a plain synchronous result; a survivor (a daemon that closed its output)
@@ -426,6 +473,7 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
                 adopt_running_command(&process, command, name, output, binary, background,
                                       started_ms, 1, display, display_data, displayed_body);
             if (adopted) {
+                buf_free(&final_stdout);
                 bash_output_destroy(output);
                 return adopted;
             }
@@ -435,13 +483,16 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
         bash_signal_process_tree(process.pid, SIGKILL);
     }
 
-    close(process.output_fd);
+    if (process.output_fd >= 0)
+        close(process.output_fd);
+    if (process.error_fd >= 0)
+        close(process.error_fd);
 
     bash_shell_pgid_retract(process.pid);
-    while (waitpid(process.pid, &wait_status, 0) < 0) {
-        if (errno != EINTR)
-            break;
-    }
+    pid_t wait_result;
+    do {
+        wait_result = waitpid(process.pid, &wait_status, 0);
+    } while (wait_result < 0 && errno == EINTR);
 
     /* A background request that completed inside the yield window never created a task; name
      * the handle the model might otherwise wait on. The note is model-only: the user never saw
@@ -463,6 +514,10 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
                        stop_reason, transition_ms, wait_status);
     if (ctx && stop_reason == BASH_STOP_INTERRUPT)
         ctx->interrupted = 1;
+    if (ctx && capture_final_stdout && stop_reason == BASH_STOP_NONE &&
+        wait_result == process.pid && WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0 &&
+        utf8_is_safe_text(final_stdout.data, final_stdout.len))
+        ctx->final_output = buf_steal(&final_stdout);
     char *result = bash_output_finish(output, binary, stop_reason, transition_ms, wait_status);
     if (*task_footer) {
         char *with_footer = xasprintf("%s%s", result, task_footer);
@@ -471,6 +526,7 @@ char *bash_run_command(const char *command, long timeout_ms, int background, con
         if (ctx)
             ctx->output_hidden_tail = strlen(task_footer);
     }
+    buf_free(&final_stdout);
     bash_output_destroy(output);
     return result;
 }
