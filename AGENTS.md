@@ -127,17 +127,23 @@ Extension workflows:
   in `meson.build`; a user-visible endpoint variant should be config, not C.
 - A compiled-in tool needs its source in `meson.build`, an exported `const struct tool` declaration
   in `tool.h`, and an entry in `agent_core.c`'s `TOOLS[]`.
+- A slash command is an entry in `slash.c`'s `COMMANDS[]`. Code that serves only that command lives
+  in `src/commands/<name>.c`, exporting `<name>_command` and, when its arguments complete,
+  `<name>_choices`. A name another module in `src/` already uses takes a `_cmd` suffix
+  (`session_cmd.c`), since a same-named header there would shadow the other one. Logic other
+  callers share stays in its own module, as selection does in `select.c`.
 - Keep protocol translation and terminal-independent state machines pure and separately testable;
   do not require HTTP or a TTY to test parsing and state transitions.
 
 ## Tests
 
 Unit tests are plain C binaries using `tests/harness.h` (`EXPECT`, `EXPECT_STR_EQ`, `T_SKIP`,
-`T_REPORT`). Create scratch directories with the harness's `t_tempdir()`, which removes them
-at process exit; raw `mkdtemp` in tests fails `make lint`. To add a test, append its source to
-`test_sources` in `tests/meson.build`, grouped to mirror the production `sources` list. Test
-names are path-derived: `tools/test_read.c` becomes `tools/read`, and `test_buf.c` becomes
-`buf`.
+`T_REPORT`). Create scratch directories with the harness's `t_tempdir()`, which removes them at
+process exit; raw `mkdtemp` in tests fails `make lint`. The harness also removes inherited `HAX_*`
+variables before `main`, so a test sets the ones it depends on and need not unset the rest. To add a
+test, append its source to `test_sources` in `tests/meson.build`, grouped to mirror the production
+`sources` list. Test names are path-derived: `tools/test_read.c` becomes `tools/read`, and
+`test_buf.c` becomes `buf`.
 
 End-to-end scenarios follow the same conventions in Python: standalone scripts under
 `tests/e2e/`, registered in `e2e_scenarios` in `tests/meson.build`. They run the built binary
@@ -163,6 +169,10 @@ Where a test goes:
   the binary sent.
 - Do not assert the same behavior at two levels. Once a unit test pins it, an e2e scenario that
   repeats the check adds run time without adding signal.
+- Keep tests fast: every change runs the whole suite. Wait for the specific state or output a step
+  needs instead of sleeping, add scripted delays only where the behavior under test needs them,
+  and leave headroom for CI runners slower than your machine. `build/meson-logs/testlog.json`
+  records per-test durations; a new test should not land among the slowest.
 - Before writing a fixture (loopback server, fake command on `PATH`, scripted stream, scratch
   tree), look for one in sibling test files or the `test_support` library and reuse or extract it
   rather than copying it. Shared fixtures are a header plus a `.c` beside it (`tests/harness.h`,
@@ -184,13 +194,19 @@ Where a test goes:
 - Avoid non-portable kernel idioms: no `likely()`/`unlikely()`, `BUG_ON`, `ERR_PTR`, or
   `kmalloc`. Use `<stdint.h>` types and plain negative-int returns plus `errno`.
 - Markdown is hard-wrapped around 100 columns, same as code.
+- The user docs listed in `scripts/md2man.py`'s `PAGES` also ship as man pages, so write them for a
+  reader without the repository: no repo-relative paths, links only to other rendered docs. The
+  build fails on Markdown outside the subset that script renders.
+- Write user docs about what the user sees and does, in the user's terms rather than the code's;
+  mechanics belong in code comments. Where order or effect matters to the user, state it exactly.
 - Before changing code in any language, read [`docs/code-style.md`](docs/code-style.md) and apply
   its general naming, structure, and comment principles using that language's conventions.
 
 ## Changelog
 
 Record notable user-facing changes in `CHANGELOG.md` under `[Unreleased]` as part of the change
-itself, following the file's Keep a Changelog format.
+itself, following the file's Keep a Changelog format. Entries are release notes: a line or two on
+what changed for the user and why it matters, without implementation detail.
 
 ## Git conventions
 

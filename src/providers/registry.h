@@ -37,7 +37,7 @@ struct provider_def {
     int pinned;
     const char *api_key_env;  /* env var holding the key; NULL → local/no key */
     const char *catalog_id;   /* models.dev key (catalog.h); NULL means none. Shipped defs curate
-                                 it; a config-only def has one only from providers.<id>.catalog_id */
+                                 it; config-only defs get one only from providers.<id>.catalog_id */
     const char *metadata_api; /* /models dialect: "openai" (flat list) or "anthropic" (paged);
                                  NULL follows the default wire's family */
     int send_cache_key;       /* prompt_cache_key default (0/1) */
@@ -52,8 +52,9 @@ struct provider_def {
     const char *reasoning_roundtrip;
     /* The endpoint rejects a thinking-mode tool loop whose assistant messages lack the replay
      * member, so each carries it, empty when there is no reasoning to replay. Needs a named
-     * member: reasoning_roundtrip, a catalog hint, or a configured field.
-     * providers.<id>.reasoning_required overrides. */
+     * member: reasoning_roundtrip, a catalog hint, or a configured field. Unset, only models
+     * whose catalog hint names the member carry it. providers.<id>.reasoning_required overrides
+     * either way. */
     int reasoning_required;
     /* Messages: "auto"/"prefer-adaptive" follow model metadata and differ only for a model the
      * catalog lacks; "adaptive"/"budget"/"off" pin. NULL → auto. */

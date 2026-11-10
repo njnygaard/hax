@@ -40,11 +40,21 @@ static uint32_t decode_sequence(const unsigned char *input, size_t length)
 
 int utf8_sequence_is_valid(const char *bytes, size_t length)
 {
+    uint32_t codepoint;
+    return utf8_decode_codepoint(bytes, length, &codepoint);
+}
+
+int utf8_decode_codepoint(const char *bytes, size_t length, uint32_t *out)
+{
     const unsigned char *input = (const unsigned char *)bytes;
     if (length < 1 || length > 4 || utf8_sequence_length(input[0]) != length)
         return 0;
-    if (length == 1)
-        return input[0] < 0x80;
+    if (length == 1) {
+        if (input[0] >= 0x80)
+            return 0;
+        *out = input[0];
+        return 1;
+    }
 
     for (size_t i = 1; i < length; i++)
         if (!byte_is_continuation(input[i]))
@@ -54,9 +64,10 @@ int utf8_sequence_is_valid(const char *bytes, size_t length)
     static const uint32_t minimum_codepoint[] = {0, 0, 0x80, 0x800, 0x10000};
     if (codepoint < minimum_codepoint[length])
         return 0;
-    if (codepoint >= 0xD800 && codepoint <= 0xDFFF)
+    if ((codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF)
         return 0;
-    return codepoint <= 0x10FFFF;
+    *out = codepoint;
+    return 1;
 }
 
 int utf8_is_valid(const char *bytes, size_t length)
